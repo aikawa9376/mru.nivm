@@ -1,0 +1,71 @@
+*mru.txt*  Lua MRU/MRW tracking for Neovim
+
+Requirements: Neovim 0.10 or later.
+
+SETUP                                                           *mru-setup*
+>
+  require('mru').setup({ max_entries = 1000 })
+<
+For lazy.nvim, use event = 'BufReadPre' and opts = {}.
+Replace the old neomru.vim plugin; do not load both plugins together.
+
+HISTORIES                                                       *mru-histories*
+
+file       Recently visited or saved files.
+write      Recently saved files, separate from visits.
+directory  Parent directories of recently visited files.
+
+Storage defaults to $XDG_CACHE_HOME/neomru or ~/.cache/neomru.
+Existing neomru 0.3.0 histories are read automatically.
+
+API                                                             *mru-api*
+>
+  local mru = require('mru')
+  mru.list('write')
+  mru.list('file', { cwd = vim.fn.getcwd(), validate = true })
+  mru.append('/path/to/file')
+  mru.append('/path/to/file', 'write')
+  mru.delete('write', { '/path/to/file' })
+  mru.import('file', '/path/to/history', { oldfiles = true })
+  mru.save()
+  mru.reload()
+  mru.sync()
+<
+Lists are copies, newest first. cwd filtering respects directory boundaries.
+append without a kind records both the file and its parent directory.
+reload prunes missing/ignored entries. sync keeps pending local changes.
+
+OPTIONS                                                         *mru-options*
+
+storage_dir       Default: $XDG_CACHE_HOME/neomru or ~/.cache/neomru.
+max_entries       Default: 1000; nonnegative integer, 0 retains no entries.
+save_interval     Default: 0; seconds between automatic saves. With a positive
+                  value, pending changes flush on a subsequent change after
+                  the interval, explicit save/import/delete, setup or exit.
+validate_on_exit  Default: true; prune missing/ignored paths before exit.
+follow_links      Default: false; resolve symlinks when true.
+focus_oldfiles    Default: false; true imports oldfiles into file AND write
+                  on FocusGained, as in the original fork.
+ignore            Optional function(path, kind) returning true to exclude.
+histories         Table with file/write/directory subtables. Each accepts
+                  optional path and limit, overriding storage_dir/max_entries.
+
+COMMANDS                                                        *mru-commands*
+
+:MruSave                         Save all histories.
+:MruReload                       Synchronize and validate all histories.
+:MruImportFile {path}             Import file history.
+:MruImportWrite {path}            Import save history.
+:MruImportDirectory {path}        Import directory history.
+:NeoMRUSave / :NeoMRUReload       Aliases.
+
+SYNCHRONIZATION                                                 *mru-sync*
+
+FocusGained synchronizes all histories. Saves lock, reread, replay local changes
+and atomically replace storage. The legacy Vimscript plugin does not use these
+locks. A killed process may leave <history>.lock; remove it only when no writer
+is active, then retry :MruSave. Pending edits survive a failed save.
+
+See README.md for installation, picker examples and development instructions.
+
+vim:tw=78:ts=8:ft=help:norl:

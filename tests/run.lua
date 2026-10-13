@@ -404,7 +404,7 @@ test("native JSON and legacy files can use arbitrary filename extensions", funct
   assert(not pcall(mru.list, "directory", { time_field = "invalid" }))
 end)
 
-test("picker highlights filenames and aligns dim times for known, unknown and wide paths", function()
+test("picker highlights filenames with compact, unpadded times", function()
   setup()
   local known = file("project/short.lua")
   local unknown = file("project/日本語のファイル.lua")
@@ -417,23 +417,20 @@ test("picker highlights filenames and aligns dim times for known, unknown and wi
   package.loaded["fzf-lua"] = { fzf_exec = function(rows, opts) captured = { rows = rows, opts = opts } end }
   require("mru.fzf").open({ scope = "all", project = root .. "/project", previewer = false })
   local function plain(text) return (text:gsub("\27%[[0-9;]*m", "")) end
-  local widths = {}
   for i, row in ipairs(captured.rows) do
     local fields = vim.split(row, "\t", { plain = true })
     local path, times = plain(fields[2]), plain(fields[3])
     assert(fields[2]:find("\27[", 1, true), "Filename coloring missing")
     assert(fields[3]:find("\27[", 1, true), "Timestamp coloring missing")
-    assert(path:find(i == 1 and "short.lua" or "日本語のファイル.lua", 1, true))
-    widths[i] = vim.fn.strdisplaywidth(path)
-    equal(#times, 24)
+    equal(path, i == 1 and "short.lua" or "日本語のファイル.lua")
     if i == 1 then
-      assert(times:match("^%d%d%-%d%d %d%d:%d%d  "))
+      assert(times:match("^%d%d%-%d%d %d%d:%d%d %-%-$"))
     else
-      equal(times, "    --           --     ")
+      equal(times, "-- --")
     end
     equal(captured.opts._fmt.from(row), i == 1 and known or unknown)
   end
-  equal(widths[1], widths[2])
+  equal(captured.opts.fzf_opts["--tabstop"], "1")
   equal(captured.opts.fzf_opts["--nth"], "1")
   equal(captured.opts.fzf_opts["--ansi"], true)
   equal(vim.api.nvim_get_hl(0, { name = "MruTime" }).link, "Comment")
@@ -441,7 +438,7 @@ test("picker highlights filenames and aligns dim times for known, unknown and wi
   mru.append(long)
   require("mru.fzf").open({ scope = "all", project = root .. "/project", previewer = false })
   local fields = vim.split(captured.rows[2], "\t", { plain = true })
-  equal(vim.fn.strdisplaywidth(plain(fields[2])), 62)
+  equal(plain(fields[2]), "short.lua")
   equal(captured.opts._fmt.from(captured.rows[1]), long)
   assert(plain(captured.rows[1]):find(string.rep("long-directory/", 10), 1, true))
   package.loaded["fzf-lua"] = original

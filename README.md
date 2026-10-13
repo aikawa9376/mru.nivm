@@ -42,7 +42,7 @@ require("mru.fzf").open({ scope = "all" })
 | `alt-enter` | Open in a tab |
 | `ctrl-q` | Send selected paths to quickfix |
 
-Paths appear first, with highlighted filenames and muted directories. Visit/save times follow in aligned, muted columns; unknown historical times display as `--`. Path padding stops at 60 display cells so a long entry does not push every row's times offscreen; longer paths retain their full text and extend the row. Search matches paths, excluding timestamps. The header shows the active MRU/MRW mode, even when both histories contain the same files. Colors follow your theme through `MruFileName` (Directory), `MruDirectory` and `MruTime` (Comment), and `MruMissing` (DiagnosticWarn) highlight groups.
+Paths appear first, with highlighted filenames and muted directories. Visit/save times follow in a muted color, separated by single spaces without column padding; unknown historical times display as `--`. Full paths remain searchable, excluding timestamps. The header shows the active MRU/MRW mode, even when both histories contain the same files. Colors follow your theme through `MruFileName` (Directory), `MruDirectory` and `MruTime` (Comment), and `MruMissing` (DiagnosticWarn) highlight groups.
 
 Switches, refresh, and forgetting preserve the search query. Timestamps and labels are separate from the paths used for opening and previewing.
 

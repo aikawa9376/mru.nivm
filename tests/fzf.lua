@@ -57,6 +57,16 @@ end
 local ok, err = pcall(function()
   require("mru.fzf").open({ scope = "all", project = root, cwd = root })
   wait_for(function() return screen_contains("needle") end, "Initial candidates missing")
+  wait_for(function()
+    local buffer = terminal()
+    if not buffer then return false end
+    for _, line in ipairs(vim.api.nvim_buf_get_lines(buffer, 0, -1, false)) do
+      if line:match("needle:7 with space %d%d%-%d%d %d%d:%d%d %d%d%-%d%d %d%d:%d%d") then
+        return true
+      end
+    end
+    return false
+  end, "Path and timestamps were not separated by single spaces")
   send("\20")
   wait_for(function() return screen_contains("MRW | File / Seen / Saved") end, "Identical-history switch failed")
   send("\20")

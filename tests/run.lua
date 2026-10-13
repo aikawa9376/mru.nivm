@@ -404,7 +404,47 @@ test("native JSON and legacy files can use arbitrary filename extensions", funct
   assert(not pcall(mru.list, "directory", { time_field = "invalid" }))
 end)
 
-test("picker highlights filenames with compact, unpadded times", function()
+test("LS_COLORS adapter preserves labels and passes literal paths in one batch", function()
+  local lscolors = require("mru.lscolors")
+  local script = root .. "/colorizer.lua"
+  local log = root .. "/colorizer-args"
+  vim.fn.writefile({
+    "vim.fn.writefile({ vim.json.encode(arg) }, vim.env.MRU_COLOR_TEST_LOG, 'a')",
+    "local style = vim.env.LS_COLORS:match('%*%.lua=([^:]+)') or '0'",
+    "for _, path in ipairs(arg) do io.write('\\27[' .. style .. 'm' .. path .. '\\27[0m\\n') end",
+  }, script)
+  local command = { vim.v.progpath, "--headless", "--clean", "-u", "NONE", "-i", "NONE", "-l", script }
+  local paths = {
+    root .. "/project/日本語 $(literal) :7 with space.lua",
+    root .. "/project/absolute.lua",
+    "/home/example/name.lua", "/home/example", root .. "/control\tname.lua",
+  }
+  local labels = { "日本語 $(literal) :7 with space.lua", paths[2], "~/name.lua", "~", "control\\tname.lua" }
+  local previous_colors, previous_log = vim.env.LS_COLORS, vim.env.MRU_COLOR_TEST_LOG
+  vim.env.LS_COLORS, vim.env.MRU_COLOR_TEST_LOG = "*.lua=35", log
+  local result = lscolors.colorize(paths, labels, command)
+  for i = 1, 4 do
+    equal((result[i]:gsub("\27%[[0-9;]*m", "")), labels[i])
+    assert(result[i]:find("\27[35m", 1, true))
+  end
+  equal(result[5], nil) -- Control characters cannot enter the line protocol.
+  local calls = vim.fn.readfile(log)
+  equal(#calls, 1)
+  local arguments = vim.json.decode(calls[1])
+  for i = 1, 4 do equal(arguments[tostring(i)], paths[i]) end
+  equal(arguments["5"], nil)
+  vim.env.LS_COLORS = "*.lua=36"
+  assert(lscolors.colorize({ paths[1] }, { labels[1] }, command)[1]:find("\27[36m", 1, true))
+  equal(lscolors.colorize(paths, labels, false), {})
+  equal(lscolors.colorize(paths, labels, root .. "/missing-colorizer"), {})
+  vim.fn.writefile({ "for _, path in ipairs(arg) do io.write('wrong path\\n') end" }, script)
+  equal(lscolors.colorize(paths, labels, command), {})
+  vim.fn.writefile({ "vim.cmd('cquit 1')" }, script)
+  equal(lscolors.colorize(paths, labels, command), {})
+  vim.env.LS_COLORS, vim.env.MRU_COLOR_TEST_LOG = previous_colors, previous_log
+end)
+
+test("picker theme fallback keeps compact, unpadded times", function()
   setup()
   local known = file("project/short.lua")
   local unknown = file("project/日本語のファイル.lua")
@@ -415,7 +455,7 @@ test("picker highlights filenames with compact, unpadded times", function()
   local original = package.loaded["fzf-lua"]
   local captured
   package.loaded["fzf-lua"] = { fzf_exec = function(rows, opts) captured = { rows = rows, opts = opts } end }
-  require("mru.fzf").open({ scope = "all", project = root .. "/project", previewer = false })
+  require("mru.fzf").open({ scope = "all", project = root .. "/project", previewer = false, color_cmd = false })
   local function plain(text) return (text:gsub("\27%[[0-9;]*m", "")) end
   for i, row in ipairs(captured.rows) do
     local fields = vim.split(row, "\t", { plain = true })
@@ -436,7 +476,7 @@ test("picker highlights filenames with compact, unpadded times", function()
   equal(vim.api.nvim_get_hl(0, { name = "MruTime" }).link, "Comment")
   local long = file("project/" .. string.rep("long-directory/", 10) .. "long.lua")
   mru.append(long)
-  require("mru.fzf").open({ scope = "all", project = root .. "/project", previewer = false })
+  require("mru.fzf").open({ scope = "all", project = root .. "/project", previewer = false, color_cmd = false })
   local fields = vim.split(captured.rows[2], "\t", { plain = true })
   equal(plain(fields[2]), "short.lua")
   equal(captured.opts._fmt.from(captured.rows[1]), long)

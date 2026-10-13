@@ -80,10 +80,15 @@ Switching and forgetting preserve the query; forgetting never removes files.
 Paths come first; muted Seen/Saved times follow with single-space separators.
 No column padding is added. Unknown times show --; full paths remain searchable.
 Search matches paths only. The header identifies the active MRU/MRW mode.
-Highlight groups: MruFileName (Directory), MruDirectory/MruTime (Comment),
-MruMissing (DiagnosticWarn). Set these groups to customize picker colors.
-Picker options also accept query, previewer, picker (fzf-lua display settings),
-and actions (functions receiving actual selected paths, or false).
+Paths use LS_COLORS through color-ls, found in stdpath('config')/bin or PATH.
+The command inherits Neovim's LS_COLORS and colors actual paths in one batch.
+color_cmd accepts a command path or argument list; false selects theme colors.
+If unavailable, failed or timed out, the picker falls back to theme colors.
+Theme groups: MruFileName (Directory), MruDirectory/MruTime (Comment),
+MruMissing (DiagnosticWarn). Times and missing labels always use theme colors.
+Picker options also accept query, previewer, color_cmd,
+picker (fzf-lua display settings), and actions (functions receiving actual
+selected paths, or false).
 
 OPTIONS                                                         *mru-options*
 

@@ -42,11 +42,13 @@ require("mru.fzf").open({ scope = "all" })
 | `alt-enter` | Open in a tab |
 | `ctrl-q` | Send selected paths to quickfix |
 
-Paths appear first, with highlighted filenames and muted directories. Visit/save times follow in a muted color, separated by single spaces without column padding; unknown historical times display as `--`. Full paths remain searchable, excluding timestamps. The header shows the active MRU/MRW mode, even when both histories contain the same files. Colors follow your theme through `MruFileName` (Directory), `MruDirectory` and `MruTime` (Comment), and `MruMissing` (DiagnosticWarn) highlight groups.
+Paths appear first, colored using `LS_COLORS` via `color-ls`. Visit/save times follow in a muted color, separated by single spaces without column padding; unknown historical times display as `--`. Full paths remain searchable, excluding timestamps. The header shows the active MRU/MRW mode, even when both histories contain the same files.
+
+The picker automatically finds `color-ls` in `stdpath("config") .. "/bin/color-ls"` (normally `~/.config/nvim/bin/color-ls`) or on `PATH`. It inherits Neovim's `LS_COLORS`, coloring actual paths in one batch before shortening their display. Set `color_cmd = "/path/to/color-ls"` or an argument list to use another location; `color_cmd = false` selects theme colors. If the command is unavailable, fails or times out, theme colors are used instead. Theme groups are `MruFileName` (Directory), `MruDirectory` and `MruTime` (Comment), and `MruMissing` (DiagnosticWarn). Dates and missing labels keep their theme colors even when paths use `LS_COLORS`.
 
 Switches, refresh, and forgetting preserve the search query. Timestamps and labels are separate from the paths used for opening and previewing.
 
-Picker options accept the query options below, plus `query`, `previewer`, and `picker` for fzf-lua display settings. Custom `actions` are functions receiving actual selected paths and fzf-lua action options (or `false` to disable a binding):
+Picker options accept the query options below, plus `query`, `previewer`, `color_cmd`, and `picker` for fzf-lua display settings. Custom `actions` are functions receiving actual selected paths and fzf-lua action options (or `false` to disable a binding):
 
 ```lua
 require("mru.fzf").open({

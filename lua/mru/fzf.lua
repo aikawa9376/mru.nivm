@@ -42,7 +42,7 @@ function M.open(opts)
   opts.project = opts.project or mru.project_root(opts.cwd)
   opts.cwd = opts.cwd or vim.fn.getcwd()
   local records = mru.entries(opts.kind, opts)
-  local rows = {}
+  local rows, labels, paths_to_color = {}, {}, {}
   local color = colors()
   for i, record in ipairs(records) do
     local path = vim.fn.fnamemodify(record.path, ":~")
@@ -52,9 +52,13 @@ function M.open(opts)
         path = record.path:sub(#prefix + 1)
       end
     end
-    path = path:gsub("[\t\r\n]", { ["\t"] = "\\t", ["\r"] = "\\r", ["\n"] = "\\n" })
+    labels[i], paths_to_color[i] = path, record.path
+  end
+  local colored = require("mru.lscolors").colorize(paths_to_color, labels, opts.color_cmd)
+  for i, record in ipairs(records) do
+    local path = labels[i]:gsub("[\t\r\n]", { ["\t"] = "\\t", ["\r"] = "\\r", ["\n"] = "\\n" })
     local directory, filename = path:match("^(.-)([^/]*)$")
-    local label = color("Directory", directory) .. color("FileName", filename)
+    local label = colored[i] or color("Directory", directory) .. color("FileName", filename)
     if record.missing then
       label = color("Missing", "[missing] ") .. label
     end

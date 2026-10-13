@@ -26,6 +26,16 @@ vim.fn.writefile({ "missing" }, missing)
 mru.append(missing)
 vim.fn.delete(missing)
 
+-- Exercise the real optional Rust backend when installed, without making it
+-- a requirement for the core plugin or the rest of the picker integration.
+local config_colorizer = vim.fn.stdpath("config") .. "/bin/color-ls"
+if vim.fn.executable(config_colorizer) == 1 or vim.fn.executable("color-ls") == 1 then
+  vim.env.LS_COLORS = "di=34:*space=35"
+  local colored = require("mru.lscolors").colorize({ target }, { "needle:7 with space" })
+  assert(colored[1] and colored[1]:find("\27[35mneedle:7 with space\27[0m", 1, true),
+    "LS_COLORS suffix color was not retained in the relative path")
+end
+
 local function terminal()
   for _, buffer in ipairs(vim.api.nvim_list_bufs()) do
     if vim.bo[buffer].buftype == "terminal" then

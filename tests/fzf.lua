@@ -5,9 +5,13 @@ assert(vim.fn.isdirectory(dependency) == 1, "Set MRU_FZF_LUA_PATH to an fzf-lua 
 vim.opt.rtp:prepend(dependency)
 local root = vim.fn.tempname()
 vim.fn.mkdir(root, "p")
+vim.env.XDG_RUNTIME_DIR = root
 local mru = require("mru")
 local fzf = require("fzf-lua")
-fzf.setup({ winopts = { height = 0.8, width = 0.8 }, file_icons = false, git_icons = false })
+fzf.setup({
+  winopts = { height = 0.8, width = 0.8 }, file_icons = false, git_icons = false,
+  fzf_opts = { ["--history"] = root .. "/query-history" },
+})
 mru.setup({ storage_dir = root .. "/history", ignore = function() return false end })
 local target = root .. "/needle:7 with space"
 local other = root .. "/another"
@@ -17,6 +21,7 @@ vim.fn.writefile({ "other" }, other)
 mru.append(target)
 mru.append(other)
 mru.append(target, "write")
+mru.append(other, "write") -- Identical visible histories must still visibly change mode.
 vim.fn.writefile({ "missing" }, missing)
 mru.append(missing)
 vim.fn.delete(missing)
@@ -52,6 +57,10 @@ end
 local ok, err = pcall(function()
   require("mru.fzf").open({ scope = "all", project = root, cwd = root })
   wait_for(function() return screen_contains("needle") end, "Initial candidates missing")
+  send("\20")
+  wait_for(function() return screen_contains("MRW | File / Seen / Saved") end, "Identical-history switch failed")
+  send("\20")
+  wait_for(function() return screen_contains("MRU | File / Seen / Saved") end, "Identical-history return failed")
   send("needle")
   wait_for(function() return screen_contains("1/2") end, "Path fuzzy filtering failed")
   wait_for(function()
@@ -76,9 +85,9 @@ local ok, err = pcall(function()
   opts = require("fzf-lua.config").__resume_data.opts
   assert(opts.query == "needle", "Period switch lost query")
   send("\24") -- ctrl-x: forget history, keep file and picker query
-  wait_for(function() return #mru.list("write") == 0 end, "History deletion failed")
+  wait_for(function() return #mru.list("write") == 1 and screen_contains("0/1") end, "History deletion failed")
   assert(vim.fn.filereadable(target) == 1, "History deletion removed the file")
-  send("\20") -- ctrl-t: return to MRU
+  send("\20") -- ctrl-t: return to MRU even when the filtered MRW list is empty
   wait_for(function() return screen_contains("MRU / cwd / hour") end, "Return to MRU failed")
   send("\8") -- ctrl-h: include missing files without forgetting them
   wait_for(function() return screen_contains("[missing]") end, "Missing toggle failed")

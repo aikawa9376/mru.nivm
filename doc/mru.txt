@@ -77,7 +77,11 @@ ctrl-s      Split.                  ctrl-v      Vertical split.
 ctrl-q      Send selected paths to quickfix.
 
 Switching and forgetting preserve the query; forgetting never removes files.
-Seen/saved columns show actual operation times; unknown times display as --.
+Paths come first; aligned, muted Seen/Saved times follow. Unknown times show --.
+Path padding stops at 60 display cells; longer paths keep their full text.
+Search matches paths only. The header identifies the active MRU/MRW mode.
+Highlight groups: MruFileName (Directory), MruDirectory/MruTime (Comment),
+MruMissing (DiagnosticWarn). Set these groups to customize picker colors.
 Picker options also accept query, previewer, picker (fzf-lua display settings),
 and actions (functions receiving actual selected paths, or false).
 

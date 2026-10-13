@@ -1,7 +1,23 @@
 local M = {}
 
 local function display_time(timestamp)
-  return timestamp and os.date("%m-%d %H:%M", timestamp) or "     --     "
+  return timestamp and os.date("%m-%d %H:%M", timestamp) or "    --     "
+end
+
+local function colors()
+  local result = {}
+  for name, link in pairs({
+    FileName = "Directory", Directory = "Comment", Time = "Comment", Missing = "DiagnosticWarn",
+  }) do
+    local group = "Mru" .. name
+    vim.api.nvim_set_hl(0, group, { default = true, link = link })
+    local fg = vim.api.nvim_get_hl(0, { name = group, link = false }).fg
+    result[name] = fg and string.format("\27[38;2;%d;%d;%dm",
+      math.floor(fg / 65536), math.floor(fg / 256) % 256, fg % 256) or ""
+  end
+  return function(name, value)
+    return result[name] == "" and value or result[name] .. value .. "\27[39m"
+  end
 end
 
 local function cycle(value, choices)
@@ -26,7 +42,8 @@ function M.open(opts)
   opts.project = opts.project or mru.project_root(opts.cwd)
   opts.cwd = opts.cwd or vim.fn.getcwd()
   local records = mru.entries(opts.kind, opts)
-  local rows = {}
+  local rows, labels, width = {}, {}, 0
+  local color = colors()
   for i, record in ipairs(records) do
     local path = vim.fn.fnamemodify(record.path, ":~")
     if require("mru.query").under(record.path, opts.project) then
@@ -35,11 +52,26 @@ function M.open(opts)
         path = record.path:sub(#prefix + 1)
       end
     end
-    path = path:gsub("\t", "\\t")
+    path = path:gsub("[\t\r\n]", { ["\t"] = "\\t", ["\r"] = "\\r", ["\n"] = "\\n" })
+    local directory, filename = path:match("^(.-)([^/]*)$")
+    local label = color("Directory", directory) .. color("FileName", filename)
+    local columns = vim.fn.strdisplaywidth(path)
     if record.missing then
-      path = "[missing] " .. path
+      label = color("Missing", "[missing] ") .. label
+      columns = columns + 10
     end
-    rows[i] = table.concat({ tostring(i), display_time(record.visited_at), display_time(record.written_at), path }, "\t")
+    labels[i] = { text = label, width = columns }
+    width = math.max(width, columns)
+  end
+  -- One unusually long path must not pad every other row beyond the viewport.
+  -- Keep the complete path searchable; long rows simply extend past this column.
+  width = math.min(width, 60)
+  for i, record in ipairs(records) do
+    -- Pad by display cells before adding ANSI colors; tabs and UTF-8 byte lengths
+    -- otherwise shift known/unknown dates and non-ASCII filenames differently.
+    local label = labels[i].text .. string.rep(" ", math.max(0, width - labels[i].width) + 2)
+    local times = color("Time", display_time(record.visited_at) .. "  " .. display_time(record.written_at))
+    rows[i] = table.concat({ tostring(i), label, times }, "\t")
   end
 
   -- Stable row IDs keep labels, timestamps and filename punctuation out of actions.
@@ -111,9 +143,10 @@ function M.open(opts)
       return action(paths(selected), action_opts)
     end or false
   end
+  local mode = opts.kind == "write" and "MRW" or "MRU"
   local picker_opts = vim.tbl_deep_extend("force", {
-    prompt = (opts.kind == "write" and "MRW" or "MRU") .. " / " .. opts.scope .. " / " .. opts.period .. "> ",
-    header = "Seen / Saved / File | ctrl-t: MRU/MRW  ctrl-g: scope  alt-d: period  ctrl-h: missing  ctrl-x: forget",
+    prompt = mode .. " / " .. opts.scope .. " / " .. opts.period .. "> ",
+    header = mode .. " | File / Seen / Saved | ctrl-t: MRU/MRW  ctrl-g: scope  alt-d: period  ctrl-h: missing  ctrl-x: forget",
     previewer = "builtin",
     query = opts.query,
     cwd = opts.cwd,
@@ -124,7 +157,8 @@ function M.open(opts)
       ["--delimiter"] = "\t",
       ["--with-nth"] = "2..",
       -- --nth addresses the displayed fields after --with-nth removes the ID.
-      ["--nth"] = "3..",
+      ["--nth"] = "1",
+      ["--ansi"] = true,
       ["--multi"] = true,
       ["--tiebreak"] = "index",
       ["--scheme"] = "history",

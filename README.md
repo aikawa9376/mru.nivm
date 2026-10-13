@@ -42,7 +42,9 @@ require("mru.fzf").open({ scope = "all" })
 | `alt-enter` | Open in a tab |
 | `ctrl-q` | Send selected paths to quickfix |
 
-Switches, refresh, and forgetting preserve the search query. Timestamps and labels are separate from the paths used for opening and previewing. Unknown historical times display as `--`.
+Paths appear first, with highlighted filenames and muted directories. Visit/save times follow in aligned, muted columns; unknown historical times display as `--`. Path padding stops at 60 display cells so a long entry does not push every row's times offscreen; longer paths retain their full text and extend the row. Search matches paths, excluding timestamps. The header shows the active MRU/MRW mode, even when both histories contain the same files. Colors follow your theme through `MruFileName` (Directory), `MruDirectory` and `MruTime` (Comment), and `MruMissing` (DiagnosticWarn) highlight groups.
+
+Switches, refresh, and forgetting preserve the search query. Timestamps and labels are separate from the paths used for opening and previewing.
 
 Picker options accept the query options below, plus `query`, `previewer`, and `picker` for fzf-lua display settings. Custom `actions` are functions receiving actual selected paths and fzf-lua action options (or `false` to disable a binding):
 

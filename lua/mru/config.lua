@@ -32,17 +32,26 @@ function M.resolve(opts)
     validate_on_exit = true,
     follow_links = false,
     focus_oldfiles = false,
+    project_root = false,
+    root_markers = { ".git", ".hg", "package.json", "pyproject.toml", "Cargo.toml", "go.mod" },
     ignore = default_ignore,
     histories = { file = {}, write = {}, directory = {} },
   }, opts)
   local known = { storage_dir = true, max_entries = true, save_interval = true,
     validate_on_exit = true, follow_links = true, focus_oldfiles = true,
-    ignore = true, histories = true }
+    ignore = true, histories = true, project_root = true, root_markers = true }
   for name in pairs(opts) do
     assert(known[name], "mru: unknown option " .. name)
   end
   assert(type(config.storage_dir) == "string" and config.storage_dir ~= "", "mru: invalid storage_dir")
   assert(type(config.ignore) == "function", "mru: ignore must be a function")
+  assert(config.project_root == false or type(config.project_root) == "string"
+    or type(config.project_root) == "function", "mru: project_root must be a path or function")
+  assert(config.project_root ~= "", "mru: project_root must not be empty")
+  assert(type(config.root_markers) == "table" and vim.islist(config.root_markers), "mru: invalid root_markers")
+  for _, marker in ipairs(config.root_markers) do
+    assert(type(marker) == "string" and marker ~= "" and not marker:find("[/\\]"), "mru: invalid root marker")
+  end
   for _, name in ipairs({ "validate_on_exit", "follow_links", "focus_oldfiles" }) do
     assert(type(config[name]) == "boolean", "mru: invalid " .. name)
   end
@@ -61,8 +70,10 @@ function M.resolve(opts)
     assert(type(history.limit) == "number" and history.limit >= 0
       and history.limit % 1 == 0, "mru: history limit must be a nonnegative integer")
     history.path = vim.fn.fnamemodify(vim.fn.expand(history.path), ":p")
-    assert(not paths[history.path], "mru: history paths must be distinct")
-    paths[history.path] = true
+    for _, path in ipairs({ history.path, history.path .. ".json", history.path .. ".lock" }) do
+      assert(not paths[path], "mru: history storage paths must be distinct")
+      paths[path] = true
+    end
   end
   return config
 end

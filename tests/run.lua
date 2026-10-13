@@ -66,6 +66,7 @@ test("buffer events record reads and only actual writes in MRW", function()
   vim.api.nvim_set_current_buf(buffer)
   equal(mru.list("file"), { a })
   vim.cmd.edit(vim.fn.fnameescape(a))
+  vim.api.nvim_buf_delete(buffer, { force = true })
 end)
 
 test("external same-second writes and deletes survive stale sessions", function()
@@ -87,7 +88,8 @@ test("FocusGained keeps buffered local writes and does not seed MRW", function()
   mru.append(a)
   mru.append(b)
   local path = storage_dir .. "/file"
-  vim.fn.writefile({ "0.3.0", c, a }, path)
+  local external = History.new(path, 1000, function() return true end, 0)
+  external:append(c)
   vim.api.nvim_exec_autocmds("FocusGained", {})
   equal(mru.list(), { b, c, a })
   equal(mru.list("write"), {})
@@ -136,7 +138,10 @@ test("symlinks and explicit validation", function()
   uv.fs_unlink(gone)
   mru.reload()
   equal(mru.list(), { a })
+  equal(mru.list("file", { include_missing = true }), { gone, a })
   mru.save()
+  local restored = file("gone")
+  equal(mru.list()[1], restored)
 end)
 
 test("invalid versions cannot overwrite storage or leak locks", function()
@@ -196,6 +201,238 @@ test("failed lock acquisition preserves pending changes for retry", function()
   uv.fs_unlink(path .. ".lock")
   history:save()
   equal(History.read(path), { a })
+end)
+
+test("automatic legacy migration retains missing paths and unknown timestamps", function()
+  setup()
+  local gone = root .. "/not-here"
+  vim.fn.mkdir(storage_dir, "p")
+  vim.fn.writefile({ "0.3.0", a, gone }, storage_dir .. "/file")
+  equal(mru.list(), { a })
+  equal(mru.list("file", { include_missing = true }), { a, gone })
+  equal(mru.entries()[1].visited_at, nil)
+  mru.migrate()
+  local state = vim.json.decode(table.concat(vim.fn.readfile(storage_dir .. "/file.json"), "\n"))
+  equal(state.version, 1)
+  equal(state.entries, { { path = a }, { path = gone } })
+  equal(vim.fn.readfile(storage_dir .. "/file"), { "0.3.0", a })
+  mru.save({ validate = true })
+  equal(mru.list("file", { include_missing = true }), { a, gone })
+end)
+
+test("visit and save timestamps are independent and durable", function()
+  setup()
+  local path = storage_dir .. "/file"
+  local history = History.new(path, 100, function() return true end, 0)
+  history:append(a, { visited_at = 100 })
+  history:append(a, { written_at = 200 })
+  local record = mru.entries()[1]
+  equal(record.visited_at, 100)
+  equal(record.written_at, 200)
+  record.visited_at = 999
+  equal(mru.entries()[1].visited_at, 100)
+  history:append(a, { visited_at = 50 })
+  equal(mru.entries()[1].visited_at, 100)
+  mru.append(b)
+  local now = os.time()
+  assert(mru.entries()[1].visited_at <= now and mru.entries()[1].visited_at >= now - 1)
+  vim.cmd.edit(vim.fn.fnameescape(b))
+  vim.cmd.write()
+  assert(mru.entries()[1].written_at >= now - 1)
+  assert(mru.entries("write")[1].written_at >= now - 1)
+end)
+
+test("period and time-field filters respect inclusive since and exclusive until", function()
+  setup()
+  local history = History.new(storage_dir .. "/file", 100, function() return true end, 0)
+  history:append(a, { visited_at = 100, written_at = 300 })
+  history:append(b, { visited_at = 200 })
+  history:import({ c }) -- Unknown times do not satisfy bounded queries.
+  equal(mru.list("file", { since = 200, ["until"] = 301 }), { b, a })
+  equal(mru.list("file", { since = 200, ["until"] = 300 }), { b })
+  equal(mru.list("file", { since = 200, time_field = "visited_at" }), { b })
+  equal(mru.list("file", { since = 200, time_field = "written_at" }), { a })
+  equal(mru.list("file", { period = "today" }), {})
+  mru.append(c)
+  equal(mru.list("file", { period = "hour" }), { c })
+  equal(mru.list("file", { period = "today" }), { c })
+  assert(not pcall(mru.list, "file", { period = "invalid" }))
+end)
+
+test("project roots detect Git worktree markers and include sibling directories", function()
+  setup()
+  vim.fn.writefile({ "gitdir: /some/worktree" }, root .. "/project/.git")
+  local sibling = file("project/tests/sibling")
+  mru.append(a)
+  mru.append(sibling)
+  mru.append(c)
+  equal(mru.project_root(root .. "/project/tests"), root .. "/project")
+  equal(mru.list("file", { scope = "project", cwd = root .. "/project/tests" }), { sibling, a })
+  equal(mru.list("file", { scope = "cwd", cwd = root .. "/project/tests" }), { sibling })
+  equal(mru.list("file", { scope = "project", project = root .. "/project" }), { sibling, a })
+  equal(mru.list("file", { scope = "all", cwd = root .. "/project/tests" }), { c, sibling, a })
+  setup({ project_root = root .. "/project" })
+  equal(mru.project_root(root .. "/project-other"), root .. "/project")
+  setup({ project_root = function(start)
+    assert(start == c)
+    return root .. "/project-other"
+  end })
+  equal(mru.project_root(c), root .. "/project-other")
+end)
+
+test("rename preserves order and combines metadata at an existing destination", function()
+  setup()
+  local history = History.new(storage_dir .. "/file", 100, function() return true end, 0)
+  history:append(a, { visited_at = 100, written_at = 300 })
+  history:append(b, { visited_at = 200 })
+  local writes = History.new(storage_dir .. "/write", 100, function() return true end, 0)
+  writes:append(a, { written_at = 300 })
+  mru.rename(a, b)
+  equal(mru.list(), { b })
+  equal(mru.list("write"), { b })
+  equal(mru.entries()[1].visited_at, 200)
+  equal(mru.entries()[1].written_at, 300)
+end)
+
+test("directory rename handles descendants and respects directory boundaries", function()
+  setup()
+  mru.append(a)
+  mru.append(b, "write")
+  mru.append(c)
+  local moved = root .. "/renamed-project"
+  assert(uv.fs_rename(root .. "/project", moved))
+  mru.rename(root .. "/project", moved, { directory = true })
+  equal(mru.list(), { c, moved .. "/a" })
+  equal(mru.list("write"), { moved .. "/b" })
+  equal(mru.list("directory"), { root .. "/project-other", moved })
+  assert(uv.fs_rename(moved, root .. "/project"))
+end)
+
+test("buffer and explicit User rename events update histories", function()
+  setup()
+  vim.cmd.edit(vim.fn.fnameescape(a))
+  mru.append(a, "write")
+  local renamed = file("buffer-renamed")
+  vim.api.nvim_buf_set_name(0, renamed)
+  equal(mru.list("write"), { renamed })
+  vim.api.nvim_exec_autocmds("User", { pattern = "MruRename", data = { from = renamed, to = b } })
+  equal(mru.list("write"), { b })
+  vim.api.nvim_exec_autocmds("User", {
+    pattern = "OilActionsPost", data = { actions = {
+      { type = "move", src_url = "oil://" .. b, dest_url = "oil://" .. c, entry_type = "file" },
+    } },
+  })
+  equal(mru.list("write"), { c })
+  vim.api.nvim_exec_autocmds("User", {
+    pattern = "OilActionsPost", data = { err = "move failed", actions = {
+      { type = "move", src_url = "oil://" .. c, dest_url = "oil://" .. a, entry_type = "file" },
+    } },
+  })
+  equal(mru.list("write"), { c })
+end)
+
+test("pending events in another instance follow a later rename", function()
+  local path = root .. "/rename-shared"
+  local first = History.new(path, 100, function() return true end, 3600)
+  local second = History.new(path, 100, function() return true end, 0)
+  first:append(a, { visited_at = 100 })
+  first:append(a, { visited_at = 200 }) -- Buffered, before second's rename.
+  second:rename(a, b, false)
+  first:save()
+  equal(first:sync(), { b })
+  equal(first.records[1].visited_at, 200)
+  first:append(a, { visited_at = 300 }) -- A later explicit visit may reuse the old name.
+  first:save()
+  equal(first:sync(), { a, b })
+end)
+
+test("native imports preserve metadata and reject corrupt metadata without overwriting", function()
+  setup()
+  local source = root .. "/native-source"
+  local history = History.new(source, 100, function() return true end, 0)
+  history:append(a, { visited_at = 123, written_at = 456 })
+  mru.import("file", source .. ".json")
+  equal(mru.entries()[1].visited_at, 123)
+  equal(mru.entries()[1].written_at, 456)
+  local path = root .. "/corrupt"
+  vim.fn.writefile({ '{"version":999,"entries":[]}' }, path .. ".json")
+  local corrupt = History.new(path, 100, function() return true end, 0)
+  assert(not pcall(function() corrupt:save() end))
+  equal(vim.fn.readfile(path .. ".json"), { '{"version":999,"entries":[]}' })
+  equal(uv.fs_stat(path .. ".lock"), nil)
+end)
+
+test("metadata commit survives export failure and retries without duplicating entries", function()
+  local path = root .. "/export-failure"
+  vim.fn.mkdir(path)
+  local history = History.new(path, 100, function() return true end, 0)
+  assert(not pcall(function() history:append(a, { visited_at = 123 }) end))
+  equal(History.read(path), { a })
+  equal(uv.fs_stat(path .. ".lock"), nil)
+  assert(#history.operations > 0)
+  uv.fs_rmdir(path)
+  history:save()
+  equal(vim.fn.readfile(path), { "0.3.0", a })
+  equal(history.records, { { path = a, visited_at = 123 } })
+end)
+
+test("unreadable metadata cannot silently fall back to an export and lose timestamps", function()
+  local path = root .. "/unreadable"
+  local history = History.new(path, 100, function() return true end, 0)
+  history:append(a, { written_at = 456 })
+  local metadata = path .. ".json"
+  assert(uv.fs_chmod(metadata, 0))
+  if vim.fn.filereadable(metadata) == 0 then
+    assert(not pcall(function() history:save() end))
+  end
+  assert(uv.fs_chmod(metadata, 384))
+  history:sync()
+  equal(history.records[1].written_at, 456)
+  equal(uv.fs_stat(path .. ".lock"), nil)
+end)
+
+test("native JSON and legacy files can use arbitrary filename extensions", function()
+  setup()
+  local legacy = root .. "/legacy.json"
+  vim.fn.writefile({ "0.3.0", a }, legacy)
+  mru.import("file", legacy)
+  equal(mru.list(), { a })
+  local source = root .. "/metadata-no-extension"
+  vim.fn.writefile({ vim.json.encode({ version = 1, entries = { { path = b, written_at = 321 } } }) }, source)
+  mru.import("write", source)
+  equal(mru.entries("write")[1].written_at, 321)
+  assert(not pcall(mru.list, "directory", { time_field = "invalid" }))
+end)
+
+test("picker switches preserve the query and act on paths rather than labels", function()
+  setup()
+  local literal = file("project/picker:7 with space")
+  mru.append(literal)
+  mru.append(literal, "write")
+  local calls = {}
+  local original = package.loaded["fzf-lua"]
+  package.loaded["fzf-lua"] = {
+    fzf_exec = function(rows, opts) calls[#calls + 1] = { rows = rows, opts = opts } end,
+    get_last_query = function() return "fallback" end,
+  }
+  local picker = require("mru.fzf")
+  picker.open({ scope = "all", query = "initial", previewer = false })
+  local first = calls[#calls]
+  equal(first.opts._fmt.from(first.rows[1]), literal)
+  first.opts.actions["ctrl-t"][1]({}, { last_query = "with space" })
+  local second = calls[#calls]
+  equal(second.opts.query, "with space")
+  assert(second.opts.prompt:find("MRW", 1, true))
+  second.opts.actions["ctrl-g"][1]({}, { last_query = "" })
+  local third = calls[#calls]
+  equal(third.opts.query, "")
+  assert(third.opts.prompt:find("cwd", 1, true))
+  second.opts.actions["ctrl-x"][1]({ second.rows[1] }, { last_query = "with space" })
+  equal(mru.list("write"), {})
+  assert(vim.fn.filereadable(literal) == 1) -- Forgetting never deletes the file.
+  first.opts.actions.enter({ first.rows[1] })
+  equal(vim.api.nvim_buf_get_name(0), literal)
+  package.loaded["fzf-lua"] = original
 end)
 
 test("concurrent Neovim processes retain every update", function()

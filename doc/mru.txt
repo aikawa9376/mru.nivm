@@ -1,13 +1,13 @@
 *mru.txt*  Lua MRU/MRW tracking for Neovim
 
-Requirements: Neovim 0.10 or later.
+Requirements: Neovim 0.10 or later. The optional picker requires fzf-lua and fzf.
 
 SETUP                                                           *mru-setup*
 >
   require('mru').setup({ max_entries = 1000 })
 <
 For lazy.nvim, use event = 'BufReadPre' and opts = {}.
-Replace the old neomru.vim plugin; do not load both plugins together.
+Replace neomru.vim in every instance; do not load both plugins together.
 
 HISTORIES                                                       *mru-histories*
 
@@ -15,57 +15,116 @@ file       Recently visited or saved files.
 write      Recently saved files, separate from visits.
 directory  Parent directories of recently visited files.
 
-Storage defaults to $XDG_CACHE_HOME/neomru or ~/.cache/neomru.
-Existing neomru 0.3.0 histories are read automatically.
-
-API                                                             *mru-api*
+QUERY                                                           *mru-api*
 >
   local mru = require('mru')
-  mru.list('write')
-  mru.list('file', { cwd = vim.fn.getcwd(), validate = true })
+  mru.list('write', { scope = 'project', period = 'today' })
+  mru.list('file', { scope = 'cwd', cwd = '/path/to/project/src' })
+  mru.list('file', { scope = 'project', project = '/path/to/project' })
+  mru.list('file', { include_missing = true })
+  mru.entries('file')
+  mru.project_root()
+<
+Lists are copies, newest first. entries returns records with path, visited_at,
+written_at and missing. Unknown timestamps are absent. Queries join known visit
+and save times across file/write histories without combining their ordering.
+
+scope defaults to all, or cwd when cwd is supplied without an explicit scope.
+project searches upward for the nearest configured root marker, falling back to
+cwd. Directory matching respects boundaries. project can set an explicit root.
+
+period accepts all, hour, today, yesterday or week (last seven days). today and
+yesterday use local calendar boundaries. since is inclusive and until exclusive
+(Unix seconds). MRW filters written_at; MRU uses the latest visit/save unless
+time_field = 'visited_at' or 'written_at'. Unknown times do not match bounded
+queries. Missing files are hidden by default but retained within history limits.
+They become visible again when they return. reload never forgets missing files.
+
+RECORDING AND RENAME                                             *mru-rename*
+>
   mru.append('/path/to/file')
   mru.append('/path/to/file', 'write')
   mru.delete('write', { '/path/to/file' })
-  mru.import('file', '/path/to/history', { oldfiles = true })
+  mru.rename('/old/file', '/new/file')
+  mru.rename('/old/dir', '/new/dir', { directory = true })
+  mru.import('file', '/path/to/old-history', { oldfiles = true })
+  mru.import('write', '/path/to/write.json')
+  mru.migrate()
   mru.save()
   mru.reload()
   mru.sync()
 <
-Lists are copies, newest first. cwd filtering respects directory boundaries.
-append without a kind records both the file and its parent directory.
-reload prunes missing/ignored entries. sync keeps pending local changes.
+append without a kind records a file visit and its parent directory. Automatic
+BufWritePost records saves in both file and write histories. rename updates only
+history; files are not moved. Directory renames include descendants. Collisions
+merge the newest known timestamps. Missing paths survive imports and validation.
+
+BufFilePre/Post and successful local OilActionsPost moves update history.
+Other integrations can emit User MruRename with data.from, data.to and optional
+data.directory. External filesystem moves are not guessed.
+
+PICKER                                                          *mru-picker*
+>
+  require('mru.fzf').open({ kind = 'write', scope = 'project', period = 'today' })
+<
+:Mru and :Mrw open the optional fzf-lua picker in the current project.
+
+ctrl-t      Switch MRU/MRW.         ctrl-g      Cycle project/all/cwd.
+alt-d       Cycle time periods.     ctrl-h      Toggle missing files.
+ctrl-r      Refresh.                ctrl-x      Forget selected history entries.
+enter       Open.                   alt-enter   Tab edit.
+ctrl-s      Split.                  ctrl-v      Vertical split.
+ctrl-q      Send selected paths to quickfix.
+
+Switching and forgetting preserve the query; forgetting never removes files.
+Seen/saved columns show actual operation times; unknown times display as --.
+Picker options also accept query, previewer, picker (fzf-lua display settings),
+and actions (functions receiving actual selected paths, or false).
 
 OPTIONS                                                         *mru-options*
 
 storage_dir       Default: $XDG_CACHE_HOME/neomru or ~/.cache/neomru.
-max_entries       Default: 1000; nonnegative integer, 0 retains no entries.
-save_interval     Default: 0; seconds between automatic saves. With a positive
-                  value, pending changes flush on a subsequent change after
-                  the interval, explicit save/import/delete, setup or exit.
-validate_on_exit  Default: true; prune missing/ignored paths before exit.
+max_entries       Default: 1000; includes retained missing records; 0 retains none.
+save_interval     Default: 0; seconds between automatic saves. Buffered changes
+                  flush on a later change after the interval, explicit save,
+                  import/delete/rename, setup or exit. No background timer.
+validate_on_exit  Default: true; prune ignored entries, retaining missing.
 follow_links      Default: false; resolve symlinks when true.
-focus_oldfiles    Default: false; true imports oldfiles into file AND write
-                  on FocusGained, as in the original fork.
+focus_oldfiles    Default: false; true seeds both file and write on FocusGained.
+project_root      Default: false; fixed root or function(start) returning root/nil.
+root_markers      Default: .git, .hg, package.json, pyproject.toml, Cargo.toml,
+                  go.mod. Nearest marker wins; .git may be a worktree marker file.
 ignore            Optional function(path, kind) returning true to exclude.
-histories         Table with file/write/directory subtables. Each accepts
-                  optional path and limit, overriding storage_dir/max_entries.
+histories         file/write/directory subtables with optional path and limit.
 
 COMMANDS                                                        *mru-commands*
 
-:MruSave                         Save all histories.
-:MruReload                       Synchronize and validate all histories.
-:MruImportFile {path}             Import file history.
+:Mru / :Mrw                      Open visited/saved files with fzf-lua.
+:MruSave                         Save metadata and regenerate path exports.
+:MruReload                       Reread histories; retain missing paths.
+:MruMigrate                      Migrate all histories immediately.
+:MruImportFile {path}             Import visited history.
 :MruImportWrite {path}            Import save history.
 :MruImportDirectory {path}        Import directory history.
+:MruRename {old} {new}            Rename a file in history only.
+:MruRename! {old} {new}           Rename a directory and descendants in history.
 :NeoMRUSave / :NeoMRUReload       Aliases.
 
-SYNCHRONIZATION                                                 *mru-sync*
+STORAGE AND MIGRATION                                           *mru-sync*
 
-FocusGained synchronizes all histories. Saves lock, reread, replay local changes
-and atomically replace storage. The legacy Vimscript plugin does not use these
-locks. A killed process may leave <history>.lock; remove it only when no writer
-is active, then retry :MruSave. Pending edits survive a failed save.
+Each history path has an authoritative .json sidecar (schema version 1) and a
+0.3.0 plain-path export for external consumers. Existing 0.3.0 histories and
+_long companions load when metadata is absent. First save migrates; MruMigrate
+migrates all immediately. Old timestamps remain unknown. JSON imports preserve
+known timestamps. Editing exports after migration does not change metadata.
 
-See README.md for installation, picker examples and development instructions.
+Saves lock, reread, replay local changes and atomically replace metadata, then
+exports. A crash between replacements may leave an outdated export; the next
+save regenerates it. Buffered events before a cross-instance rename follow the
+new path. Metadata errors never overwrite storage. A killed process can leave a
+lock: confirm no writer is active before removal, then retry MruSave. Failed
+saves keep pending changes. The old Vimscript plugin does not use this protocol.
+
+See README.md for configuration examples and development commands.
 
 vim:tw=78:ts=8:ft=help:norl:

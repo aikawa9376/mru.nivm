@@ -154,7 +154,7 @@ A `project_root` function receives the starting file/directory path. Returning `
 
 With a positive `save_interval`, the first change is saved immediately. Further changes stay in memory until another change occurs after the interval, an explicit save/import/delete/rename, reconfiguration, or exit. Queries include pending changes. There is no background flush timer.
 
-Defaults exclude temporary/mounted paths, VCS internals, backup/compiled files, and `fugitive://`, `gitgutter://`, `term://` buffers. Automatic tracking accepts named, normal buffers outside preview windows. Manual recording supports custom URI paths. Symlink paths are preserved unless `follow_links` is enabled. Unix paths retain case distinctions.
+Defaults exclude temporary/mounted paths, VCS internals, backup/compiled files, and all URI paths such as `git-worktree://`, `fugitive://`, and `term://` in every history. Existing URI entries are hidden immediately and removed from storage by exit validation. Automatic tracking and buffer rename tracking skip URI names even before a panel sets its special buffer type. Other automatic tracking accepts named, normal buffers outside preview windows. Manual recording/import can opt into custom URI paths by replacing `ignore`; URI visits do not record a parent directory. Symlink paths are preserved unless `follow_links` is enabled. Unix paths retain case distinctions.
 
 ## Storage and migration
 

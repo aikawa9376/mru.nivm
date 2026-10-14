@@ -165,7 +165,71 @@ test("default ignores, URI filtering and root preservation", function()
   equal(mru.list("write"), {})
   equal(mru.list("directory"), { "/" })
   mru.append("custom://path", "write")
+  equal(mru.list("write"), {})
+  setup() -- A custom ignore predicate can opt into manual URI recording.
+  mru.append("custom://path", "write")
   equal(mru.list("write"), { "custom://path" })
+  mru.append("custom:///home/aikawa/dotfiles/file")
+  equal(mru.list("file"), { "custom:///home/aikawa/dotfiles/file" })
+  equal(mru.list("directory"), {})
+end)
+
+test("URI buffers never enter automatic history before becoming nofile", function()
+  setup() -- Even a custom ignore predicate must not admit automatic URI events.
+  mru.append(a)
+  for _, scheme in ipairs({ "git-worktree", "git-branch", "git-stash", "custom" }) do
+    local buffer = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(buffer, scheme .. "://" .. root .. "/project")
+    vim.api.nvim_set_current_buf(buffer) -- BufEnter fires while buftype is still empty.
+    vim.api.nvim_exec_autocmds("BufWritePost", { buffer = buffer })
+    vim.bo[buffer].buftype = "nofile"
+    equal(mru.list("file"), { a })
+    equal(mru.list("write"), {})
+    equal(mru.list("directory"), { root .. "/project" })
+    vim.cmd.edit(vim.fn.fnameescape(a))
+    vim.api.nvim_buf_delete(buffer, { force = true })
+  end
+end)
+
+test("default URI exclusion covers existing histories, imports and exports", function()
+  setup({ ignore = require("mru.config").resolve().ignore })
+  local uri = "git-worktree:///home/aikawa/dotfiles"
+  local source = root .. "/uri-import"
+  vim.fn.writefile({ "0.3.0", uri, "git-branch:///repo", "custom://path", "/" }, source)
+  vim.fn.mkdir(storage_dir, "p")
+  for _, kind in ipairs({ "file", "write", "directory" }) do
+    local path = storage_dir .. "/" .. kind
+    -- Native and legacy histories may already contain temporary buffer names.
+    if kind == "file" then
+      vim.fn.writefile({ "0.3.0", uri, "custom://path", "/" }, path)
+    else
+      vim.fn.writefile({ vim.json.encode({ version = 1, entries = {
+        { path = uri }, { path = "custom://path" }, { path = "/" },
+      } }) }, path .. ".json")
+    end
+    local expected = kind == "directory" and { "/" } or {}
+    equal(mru.list(kind, { scope = "all" }), expected)
+    equal(mru.list(kind, { scope = "all", include_missing = true }), { "/" })
+    mru.append(uri, kind)
+    mru.import(kind, source)
+    mru.save()
+    equal(vim.fn.readfile(path), kind == "directory" and { "0.3.0", "/" } or { "0.3.0" })
+    mru.save({ validate = true })
+    equal(History.read(path), { "/" }) -- Validation retains ordinary missing paths.
+  end
+end)
+
+test("URI buffer renames cannot move ordinary file history", function()
+  setup()
+  vim.cmd.edit(vim.fn.fnameescape(a))
+  local buffer = vim.api.nvim_get_current_buf()
+  mru.append(a, "write")
+  vim.api.nvim_buf_set_name(0, "git-worktree://" .. root .. "/project")
+  equal(mru.list("write"), { a })
+  vim.api.nvim_buf_set_name(0, b)
+  equal(mru.list("write"), { a })
+  vim.cmd.edit(vim.fn.fnameescape(a))
+  vim.api.nvim_buf_delete(buffer, { force = true })
 end)
 
 test("setup idempotence and command registration", function()

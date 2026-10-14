@@ -20,8 +20,12 @@ local buffer_names = {}
 ---@field include_missing? boolean
 ---@field validate? boolean
 
+local function is_uri(path)
+  return path:match("^%a[%w+.-]*://") ~= nil
+end
+
 local function normalize(path)
-  if path:match("^%a[%w+.-]*://") then
+  if is_uri(path) then
     return path
   end
   -- Expand only a leading home marker; literal %, # and $ in filenames stay literal.
@@ -49,7 +53,7 @@ local function allowed(path, kind)
 end
 
 local function exists(path, kind)
-  if path:match("^%a[%w+.-]*://") then
+  if is_uri(path) then
     return true
   end
   if kind == "directory" then
@@ -99,7 +103,7 @@ function M.append(path, kind)
   if valid(path, kind or "file") then
     get(kind):append(path, timestamp)
   end
-  if kind == nil or kind == "file" then
+  if (kind == nil or kind == "file") and not is_uri(path) then
     local directory = normalize(vim.fn.fnamemodify(path, ":h"))
     if valid(directory, "directory") then
       get("directory"):append(directory, { visited_at = os.time() })
@@ -113,7 +117,7 @@ function M.project_root(start)
   if not start then
     local buffer = vim.api.nvim_get_current_buf()
     local name = vim.api.nvim_buf_get_name(buffer)
-    start = vim.bo[buffer].buftype == "" and name ~= "" and not name:match("^%a[%w+.-]*://")
+    start = vim.bo[buffer].buftype == "" and name ~= "" and not is_uri(name)
       and name or vim.fn.getcwd()
   end
   return require("mru.project").resolve(start, config, normalize)
@@ -273,7 +277,8 @@ local function record_buffer(event, write)
     return
   end
   local path = vim.api.nvim_buf_get_name(buffer)
-  if path ~= "" then
+  -- Panels can enter the window before their creator sets buftype=nofile.
+  if path ~= "" and not is_uri(path) then
     if write then
       if valid(path, "file") then
         get("file"):append(normalize(path), { written_at = os.time() })
@@ -314,8 +319,9 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("FocusGained", { group = group, callback = safe(M.sync) })
   vim.api.nvim_create_autocmd("BufFilePre", {
     group = group, callback = function(event)
-      if vim.bo[event.buf].buftype == "" then
-        buffer_names[event.buf] = vim.api.nvim_buf_get_name(event.buf)
+      local name = vim.api.nvim_buf_get_name(event.buf)
+      if vim.bo[event.buf].buftype == "" and not is_uri(name) then
+        buffer_names[event.buf] = name
       end
     end,
   })
@@ -324,7 +330,7 @@ function M.setup(opts)
       local from = buffer_names[event.buf]
       buffer_names[event.buf] = nil
       local to = vim.api.nvim_buf_get_name(event.buf)
-      if from and from ~= "" and to ~= "" then
+      if from and from ~= "" and to ~= "" and not is_uri(to) then
         M.rename(from, to)
       end
     end),

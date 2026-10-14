@@ -59,6 +59,12 @@ BufWritePost records saves in both file and write histories. rename updates only
 history; files are not moved. Directory renames include descendants. Collisions
 merge the newest known timestamps. Missing paths survive imports and validation.
 
+Defaults exclude all scheme:// URI paths in every history, including existing
+entries. Exit validation removes these entries from storage. Automatic recording
+and buffer rename tracking always skip URI names, including panels that set
+buftype after entering a window. Replacing ignore can allow explicit URI append
+or import; URI visits do not record a parent directory.
+
 BufFilePre/Post and successful local OilActionsPost moves update history.
 Other integrations can emit User MruRename with data.from, data.to and optional
 data.directory. External filesystem moves are not guessed.

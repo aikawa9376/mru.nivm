@@ -1,6 +1,9 @@
 local M = {}
 
 local function default_ignore(path, kind)
+  if path:match("^%a[%w+.-]*://") then
+    return true
+  end
   if path:match("^\\\\") or path:match("^/mnt/") or path:match("^/media/")
     or path:match("^/temp/") or path:match("^/tmp/")
     or path:match("^/var/folders/") or path:match("^/private/var/folders/") then
@@ -12,8 +15,7 @@ local function default_ignore(path, kind)
     end
   end
   if kind ~= "directory" then
-    if path:match("~$") or path:match("^fugitive://")
-      or path:match("^gitgutter://") or path:match("^term://") then
+    if path:match("~$") then
       return true
     end
     local extension = path:match("%.([^./]+)$")

@@ -107,6 +107,7 @@ mru.sync()                              -- synchronize, keeping pending local ch
 
 mru.import("file", "/path/to/old-mru", { oldfiles = true })
 mru.import("write", "/path/to/native/write.json")
+mru.import("file", "/path/to/path-list") -- headerless, one path per line
 mru.migrate()                           -- migrate all histories and regenerate exports
 
 mru.rename("/old/file", "/new/file")
@@ -158,14 +159,24 @@ Defaults exclude temporary/mounted paths, VCS internals, backup/compiled files, 
 
 ## Storage and migration
 
-The default directory remains `$XDG_CACHE_HOME/neomru` (or `~/.cache/neomru`). Each history has:
+The default directory is `$XDG_CACHE_HOME/neomru` (or `~/.cache/neomru`), keeping existing shell consumers at the same paths. Each history has:
 
-- `file.json`, `write.json`, `directory.json`: authoritative schema version 1, containing paths, known timestamps, and rename records.
-- `file`, `write`, `directory`: generated `0.3.0` plain-path exports for existing fzf and shell consumers. These include paths available and non-ignored at the last save.
+- `file.json`, `write.json`, `directory.json`: authoritative native JSON with `schema_version: 1`, containing paths, known timestamps, and rename records. The schema version is independent of plugin releases.
+- `file`, `write`, `directory`: generated headerless lists, one literal path per line, newest first. These include paths available and non-ignored at the last save. An empty history exports an empty file.
 
-When metadata is absent, the corresponding old `0.3.0` history and optional `_long` companion are read automatically. The first save creates metadata; `:MruMigrate` migrates all three immediately. Old ordering is retained within configured limits. Old operation times remain unknown rather than being inferred from file modification times. Imports also accept native JSON, preserve known times and missing paths, and never modify the source file unless it is itself configured as the destination.
+The native JSON shape is:
 
-Once JSON exists, editing the plain export does not modify the authoritative history. Configure the old plugin out of every instance; it does not participate in the new storage or locking protocol. Existing consumers can continue reading the generated path lists.
+```json
+{
+  "schema_version": 1,
+  "entries": [{ "path": "/home/user/project/file.lua", "visited_at": 1791932400 }],
+  "moves": []
+}
+```
+
+When JSON is absent, a headerless path list or old `0.3.0` history and optional `_long` companion are read automatically. The old header and tab-separated metadata are recognized only for legacy input; tabs in native paths remain literal. Existing Lua JSON using `version: 1` is also accepted. The next save writes native JSON and headerless exports; `:MruMigrate` converts all three histories immediately. Ordering, known timestamps and stored rename records survive migration within configured limits. Unknown operation times remain absent rather than being inferred from file modification times. Imports accept all three formats and never modify the source file unless it is itself configured as the destination.
+
+Once JSON exists, editing the plain export does not modify the authoritative history. Shell consumers should read every line of the export; remove any unconditional first-line skipping. Configure the old plugin out of every instance; it does not participate in the new storage or locking protocol. Update and restart all running Lua-plugin instances together: earlier versions cannot read the new JSON field and require the old export header.
 
 Saves hold an exclusive `<history>.lock` over the entire read/merge/write. Metadata and exports are each replaced atomically; metadata is committed first. If a process stops between the two replacements, the next save regenerates the export from metadata. Pending events recorded before another instance's rename follow that rename, while later explicit visits can reuse the old pathname.
 

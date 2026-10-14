@@ -49,6 +49,7 @@ RECORDING AND RENAME                                             *mru-rename*
   mru.rename('/old/dir', '/new/dir', { directory = true })
   mru.import('file', '/path/to/old-history', { oldfiles = true })
   mru.import('write', '/path/to/write.json')
+  mru.import('file', '/path/to/headerless-path-list')
   mru.migrate()
   mru.save()
   mru.reload()
@@ -127,11 +128,21 @@ COMMANDS                                                        *mru-commands*
 
 STORAGE AND MIGRATION                                           *mru-sync*
 
-Each history path has an authoritative .json sidecar (schema version 1) and a
-0.3.0 plain-path export for external consumers. Existing 0.3.0 histories and
-_long companions load when metadata is absent. First save migrates; MruMigrate
-migrates all immediately. Old timestamps remain unknown. JSON imports preserve
-known timestamps. Editing exports after migration does not change metadata.
+Each history path has authoritative JSON with schema_version = 1 and a
+headerless export for external consumers: one literal path per line, newest
+first; empty histories export empty files. Schema versions are independent of
+plugin release versions. Storage paths stay under the configured storage_dir.
+
+Existing JSON with version = 1 is accepted and rewritten on save. When JSON is
+absent, headerless lists or old 0.3.0 histories and _long companions load. Only
+legacy input strips the old header and tab-separated metadata. Native paths
+retain literal tabs. First save migrates; MruMigrate converts all immediately.
+Known timestamps, rename records and ordering survive; unknown times stay absent.
+Imports accept all three formats. Editing exports does not change JSON history.
+
+External consumers must read every export line without skipping the first.
+Update and restart running plugin instances together; previous versions expect
+the old JSON version field and export header.
 
 Saves lock, reread, replay local changes and atomically replace metadata, then
 exports. A crash between replacements may leave an outdated export; the next

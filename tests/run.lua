@@ -104,7 +104,7 @@ test("legacy import, long history, deduplication and persisted format", function
   vim.fn.writefile({ "0.3.0", c, a }, path .. "_long")
   mru.import("file", path)
   equal(mru.list(), { a, b, c })
-  equal(vim.fn.readfile(storage_dir .. "/file"), { "0.3.0", a, b, c })
+  equal(vim.fn.readfile(storage_dir .. "/file"), { a, b, c })
 end)
 
 test("limits including zero and Unix case-sensitive names", function()
@@ -213,7 +213,7 @@ test("default URI exclusion covers existing histories, imports and exports", fun
     mru.append(uri, kind)
     mru.import(kind, source)
     mru.save()
-    equal(vim.fn.readfile(path), kind == "directory" and { "0.3.0", "/" } or { "0.3.0" })
+    equal(vim.fn.readfile(path), kind == "directory" and { "/" } or {})
     mru.save({ validate = true })
     equal(History.read(path), { "/" }) -- Validation retains ordinary missing paths.
   end
@@ -277,9 +277,10 @@ test("automatic legacy migration retains missing paths and unknown timestamps", 
   equal(mru.entries()[1].visited_at, nil)
   mru.migrate()
   local state = vim.json.decode(table.concat(vim.fn.readfile(storage_dir .. "/file.json"), "\n"))
-  equal(state.version, 1)
+  equal(state.schema_version, 1)
+  equal(state.version, nil)
   equal(state.entries, { { path = a }, { path = gone } })
-  equal(vim.fn.readfile(storage_dir .. "/file"), { "0.3.0", a })
+  equal(vim.fn.readfile(storage_dir .. "/file"), { a })
   mru.save({ validate = true })
   equal(mru.list("file", { include_missing = true }), { a, gone })
 end)
@@ -304,6 +305,74 @@ test("visit and save timestamps are independent and durable", function()
   vim.cmd.write()
   assert(mru.entries()[1].written_at >= now - 1)
   assert(mru.entries("write")[1].written_at >= now - 1)
+end)
+
+test("headerless exports round-trip literal paths and empty histories", function()
+  setup()
+  local literal = file("project/日本語\t123 %#$name")
+  mru.append(literal)
+  mru.append(a)
+  mru.save()
+  local path = storage_dir .. "/file"
+  equal(vim.fn.readfile(path), { a, literal })
+  equal(vim.fn.readfile(storage_dir .. "/write"), {})
+  equal(History.read_records(storage_dir .. "/write"), {})
+  local source = root .. "/headerless-import"
+  vim.fn.writefile(vim.fn.readfile(path), source)
+  equal(History.read_records(source), { { path = a }, { path = literal } })
+  setup()
+  mru.import("file", source)
+  equal(mru.list(), { a, literal })
+  equal(mru.entries()[1].visited_at, nil)
+  -- A headerless list also seeds storage when JSON is absent.
+  vim.fn.delete(storage_dir .. "/file.json")
+  equal(mru.list(), { a, literal })
+  mru.migrate()
+  equal(vim.fn.readfile(storage_dir .. "/file"), { a, literal })
+  mru.delete("file", { a, literal })
+  equal(vim.fn.readfile(storage_dir .. "/file"), {})
+  equal(History.read_records(storage_dir .. "/file.json"), {})
+end)
+
+test("old Lua JSON migrates timestamps and rename records to schema_version", function()
+  setup()
+  local path = storage_dir .. "/file"
+  vim.fn.mkdir(storage_dir, "p")
+  local move = { from = a, to = b, directory = false, at = 250 }
+  local records = { { path = b, visited_at = 100, written_at = 200 }, { path = c } }
+  vim.fn.writefile({ vim.json.encode({ version = 1, entries = records, moves = { move } }) }, path .. ".json")
+  mru.migrate()
+  local state = vim.json.decode(table.concat(vim.fn.readfile(path .. ".json"), "\n"))
+  equal(state, { schema_version = 1, entries = records, moves = { move } })
+  equal(vim.fn.readfile(path), { b, c })
+  -- JSON remains authoritative even when somebody edits the export.
+  vim.fn.writefile({ a }, path)
+  equal(mru.list(), { b, c })
+  mru.save()
+  equal(vim.fn.readfile(path), { b, c })
+  setup()
+  mru.import("file", path .. ".json")
+  equal(mru.entries()[1].visited_at, 100)
+  equal(mru.entries()[1].written_at, 200)
+end)
+
+test("unsupported or conflicting JSON schemas never overwrite storage", function()
+  local path = root .. "/bad-schema"
+  for _, state in ipairs({
+    { schema_version = 999, entries = {} },
+    { schema_version = 999, version = 1, entries = {} },
+    { schema_version = 1, version = 999, entries = {} },
+    { entries = {} },
+  }) do
+    local original = vim.json.encode(state)
+    vim.fn.writefile({ original }, path .. ".json")
+    vim.fn.writefile({ a }, path)
+    local history = History.new(path, 100, function() return true end, 0)
+    assert(not pcall(function() history:save() end))
+    equal(vim.fn.readfile(path .. ".json"), { original })
+    equal(vim.fn.readfile(path), { a })
+    equal(uv.fs_stat(path .. ".lock"), nil)
+  end
 end)
 
 test("period and time-field filters respect inclusive since and exclusive until", function()
@@ -436,7 +505,7 @@ test("metadata commit survives export failure and retries without duplicating en
   assert(#history.operations > 0)
   uv.fs_rmdir(path)
   history:save()
-  equal(vim.fn.readfile(path), { "0.3.0", a })
+  equal(vim.fn.readfile(path), { a })
   equal(history.records, { { path = a, visited_at = 123 } })
 end)
 

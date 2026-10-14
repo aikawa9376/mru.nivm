@@ -1,8 +1,8 @@
 local uv = vim.uv or vim.loop
 local M = {}
 M.__index = M
-M.VERSION = "0.3.0" -- Plain-path export and legacy import version.
 M.SCHEMA = 1
+local LEGACY_VERSION = "0.3.0" -- Read-only compatibility with neomru histories.
 
 local function key(path)
   return (vim.fn.has("win32") == 1 or vim.fn.has("win64") == 1) and vim.fn.tolower(path) or path
@@ -41,15 +41,18 @@ local function unique(records, limit)
   return result
 end
 
-local function legacy(path)
+local function read_paths(path)
   if vim.fn.filereadable(path) == 0 then
     return nil
   end
   local lines = vim.fn.readfile(path)
-  assert(lines[1] == M.VERSION, "mru: unsupported history version in " .. path)
+  local legacy = lines[1] == LEGACY_VERSION
+  assert(legacy or not (lines[1] or ""):match("^%d+%.%d+%.%d+"),
+    "mru: unsupported legacy history version in " .. path)
   local records = {}
-  for i = 2, #lines do
-    local name = lines[i]:match("^[^\t]*")
+  for i = legacy and 2 or 1, #lines do
+    -- Only the old format has tab-separated metadata; native paths stay literal.
+    local name = legacy and lines[i]:match("^[^\t]*") or lines[i]
     if name ~= "" then
       records[#records + 1] = { path = name }
     end
@@ -68,7 +71,12 @@ end
 
 local function decode_state(metadata)
   local state = vim.json.decode(table.concat(vim.fn.readfile(metadata), "\n"))
-  assert(type(state) == "table" and state.version == M.SCHEMA,
+  assert(type(state) == "table", "mru: invalid metadata in " .. metadata)
+  local schema = state.schema_version
+  if schema == nil then
+    schema = state.version -- Import the initial Lua format without losing timestamps.
+  end
+  assert(schema == M.SCHEMA and (state.version == nil or state.version == schema),
     "mru: unsupported metadata version in " .. metadata)
   assert(type(state.entries) == "table" and vim.islist(state.entries), "mru: invalid entries in " .. metadata)
   state.moves = state.moves or {}
@@ -91,15 +99,15 @@ local function read_state(path)
     assert(vim.fn.filereadable(metadata) == 1, "mru: metadata is not readable: " .. metadata)
     return decode_state(metadata)
   end
-  local records = legacy(path) or {}
-  local long = legacy(path .. "_long")
+  local records = read_paths(path) or {}
+  local long = read_paths(path .. "_long")
   if long then
     vim.list_extend(records, long)
   end
   return { entries = records, moves = {} }
 end
 
----Read paths from canonical storage, or directly from a legacy import file.
+---Read paths from canonical storage, or directly from an import file.
 function M.read(path, import)
   local records
   if import then
@@ -120,7 +128,7 @@ function M.read_records(path)
       return decode_state(path).entries
     end
   end
-  return legacy(path)
+  return read_paths(path)
 end
 
 local function translated(path, move)
@@ -261,13 +269,13 @@ function M:save(validate)
     if validate then
       records = vim.tbl_filter(function(record) return self.allowed_path(record.path) end, records)
     end
-    local lines = { M.VERSION }
+    local lines = {}
     for _, record in ipairs(records) do
       if self.allowed_path(record.path) and self.validate_path(record.path) then
         lines[#lines + 1] = record.path
       end
     end
-    local state = { version = M.SCHEMA, entries = records, moves = self.moves }
+    local state = { schema_version = M.SCHEMA, entries = records, moves = self.moves }
     vim.fn.writefile({ vim.json.encode(state) }, metadata_temp)
     vim.fn.writefile(lines, temp)
     -- Metadata is authoritative. A failed export is regenerated on the next save.

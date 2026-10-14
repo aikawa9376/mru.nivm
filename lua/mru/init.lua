@@ -191,7 +191,7 @@ function M.delete(kind, paths)
   history:delete(vim.tbl_map(normalize, paths))
 end
 
----Import legacy 0.3.0 paths or native metadata (and an optional _long file).
+---Import native JSON, headerless paths or legacy histories (and an optional _long file).
 ---@param kind 'file'|'write'|'directory'
 ---@param path string
 ---@param opts? {oldfiles?: boolean}
